@@ -1,8 +1,10 @@
 import io
 import os, sys, json, time, traceback
 from dotenv import load_dotenv
-from PIL import Image
-import numpy as np
+
+# --- MUDANÇA: Não precisamos mais de PIL ou Numpy aqui ---
+# from PIL import Image
+# import numpy as np
 
 # carrega .env do worker
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,14 +19,13 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 import django
 django.setup()
 
-# 1. Defina as ENVs ANTES de importar o paddleocr
-print("[WORKER] Configurando ENVs do Paddle...")
-os.environ.setdefault("FLAGS_use_mkldnn", "0")
-os.environ.setdefault("PDX_HOME", "/home/ec2-user/.pdx")
-os.environ.setdefault("PADDLEOCR_HOME", "/home/ec2-user/.paddleocr")
+# ==============================================================================
+# MUDANÇA: Imports e ENVs
+# ==============================================================================
+# 1. Importa o EasyOCR
+import easyocr
 
-# 2. Importe o PaddleOCR no topo
-from paddleocr import PaddleOCR
+# 2. Removemos as ENVs do Paddle (PDX_HOME, etc.)
 
 import boto3
 from django.conf import settings
@@ -35,46 +36,39 @@ session = boto3.session.Session(region_name=settings.AWS_REGION)
 s3 = session.client("s3")
 sqs = session.client("sqs")
 
-# 3. Inicialize o OCR globalmente, UMA VEZ.
-print("[WORKER] Inicializando PaddleOCR (isso pode levar um tempo)...")
-_OCR = PaddleOCR(
-    use_doc_orientation_classify=False,
-    use_doc_unwarping=False,
-    use_textline_orientation=False
-)
-print("[WORKER] PaddleOCR pronto.")
+# ==============================================================================
+# MUDANÇA: Inicializa o EasyOCR (globalmente, UMA VEZ)
+# ==============================================================================
+print("[WORKER] Inicializando EasyOCR (isso pode levar um tempo)...")
+# Forçamos CPU (gpu=False) e carregamos o modelo de inglês ('en')
+_EASYOCR_MODEL = easyocr.Reader(['en'], gpu=False)
+print("[WORKER] EasyOCR pronto.")
 
-def get_ocr():
-    """Retorna a instância global e pré-inicializada do PaddleOCR."""
-    global _OCR
-    return _OCR
 
+def get_easyocr_model():
+    """Retorna a instância global e pré-inicializada do EasyOCR."""
+    global _EASYOCR_MODEL
+    return _EASYOCR_MODEL
+
+# ==============================================================================
+# MUDANÇA: Função mock_ocr() agora usa EasyOCR
+# ==============================================================================
 def mock_ocr(bytes_data: bytes) -> str:
-    ocr = get_ocr() # Agora apenas retorna a instância pronta
-    img = Image.open(io.BytesIO(bytes_data)).convert("RGB")
-
-    MAX_WIDTH = 640
-    width, height = img.size
-
-    if width > MAX_WIDTH:
-        try:
-            # Calcula a nova altura mantendo a proporção
-            new_height = int(MAX_WIDTH * (height / width))
-            print(f"[RESIZE] Redimensionando de {width}x{height} para {MAX_WIDTH}x{new_height}")
-            # Usa ANTIALIAS para qualidade
-            img = img.resize((MAX_WIDTH, new_height), Image.Resampling.LANCZOS) 
-        except Exception as e:
-            print(f"[RESIZE_WARN] Falha ao redimensionar imagem: {e}")
-            # Continua com a imagem original se falhar
-
-    result = ocr.predict(np.array(img)) 
+    """
+    Roda o EasyOCR diretamente nos bytes da imagem.
+    Sem resize, sem PIL, sem Numpy. Mais rápido e mais limpo.
+    """
+    ocr = get_easyocr_model() 
     
-    texts = []
-    if result and result[0]:
-        for line in result[0]:
-            if line and len(line) >= 2 and line[1]:
-                texts.append(line[1][0])
-    return "\n".join(texts).strip()
+    print(f"[INFO] Processando imagem com EasyOCR...")
+
+    # EasyOCR pode ler os bytes puros diretamente
+    # detail=0 (só o texto) e paragraph=True (tenta juntar linhas)
+    result = ocr.readtext(bytes_data, detail=0, paragraph=True)
+    
+    # O resultado já é uma lista de strings. Juntamos com espaço.
+    return " ".join(result).strip()
+# ==============================================================================
 
 
 def set_job_status_if_complete(job: Job):
@@ -109,9 +103,9 @@ def process_message(msg):
         print(f"[WARN] item não encontrado no DB: {item_id}")
         return
 
-    # OCR mock
+    # OCR
     try:
-        text = mock_ocr(raw)
+        text = mock_ocr(raw) # Agora esta função usa EasyOCR
         with transaction.atomic():
             it = JobItem.objects.select_for_update().get(id=item_id)
             it.ocr_text = text

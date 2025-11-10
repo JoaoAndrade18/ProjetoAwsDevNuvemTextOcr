@@ -11,9 +11,10 @@ bash scripts/deploy-web.sh "$WEB_IP" "$PEM"
 
 # subir o worker
 WORKER_IP=3.83.237.26
-bash scripts/deploy-worker.sh "$WORKER_IP" "$PEM"
 
--- Se der erro de espaco em disco, va a aws depois ec2, procure a instancia corretam, vai em disco depois clica no id, depois la em cima em acoes va em modificar.
+-- Editar o volume da EC2 worker e colocar 20 GB.
+
+bash scripts/deploy-worker.sh "$WORKER_IP" "$PEM"
 
 
 sudo growpart /dev/nvme0n1 1

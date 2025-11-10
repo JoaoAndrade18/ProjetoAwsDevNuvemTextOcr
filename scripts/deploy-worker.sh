@@ -65,20 +65,31 @@ ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
   ls -la /opt/ocr-aws/backend ; ls -la /opt/ocr-aws/backend/app || true
 "'
 
-echo "==[5/9] Venv + dependências do worker=="
-ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
-  set -euo pipefail
-  cd /opt/ocr-aws/worker
-  PY=\$(command -v python3.11 || command -v python3)
-  \$PY -m venv .venv
-  source .venv/bin/activate
-  python -V; pip -V
-  pip install -U pip
-  pip install -r requirements.txt
-  # driver postgres (caso o worker também escreva no RDS via Django/psycopg2)
-  pip install psycopg2-binary==2.9.9
-  echo [venv] ok
-"'
+echo "==[5/9] Venv + dependências do worker (com TMPDIR customizado)=="
+ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc cat <<'"'REMOTE5'"' | bash
+set -euo pipefail
+cd /opt/ocr-aws/worker
+
+echo "--- Criando diretório TMP customizado (para evitar /tmp cheio)..."
+mkdir -p /opt/ocr-aws/worker/tmp
+export TMPDIR=/opt/ocr-aws/worker/tmp
+echo "--- TMPDIR foi setado para: $TMPDIR"
+
+PY=$(command -v python3.11 || command -v python3)
+$PY -m venv .venv
+source .venv/bin/activate
+
+python -V; pip -V
+pip install -U pip
+echo "--- Iniciando pip install (pode demorar)..."
+pip install -r requirements.txt
+
+pip install psycopg2-binary==2.9.9
+
+echo "--- Limpando TMP customizado..."
+rm -rf "$TMPDIR"
+echo "[venv] ok"
+REMOTE5'
 
 echo "==[6/9] Publicar credenciais AWS do desktop para a EC2=="
 ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "

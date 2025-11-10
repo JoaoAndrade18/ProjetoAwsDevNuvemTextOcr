@@ -4,8 +4,5 @@ python-dotenv==1.0.1
 Django==5.0.7       
 djangorestframework==3.15.2
 psycopg2-binary==2.9.9
-paddleocr==2.7.0.3
-paddle-bfloat==0.1.7
-paddlepaddle==2.5.2
-pillow
+easyocr
 numpy

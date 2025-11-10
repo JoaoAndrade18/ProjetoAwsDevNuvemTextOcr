@@ -66,3 +66,118 @@ A aplicação é composta por três principais componentes executados em instân
   "created_at": "<iso8601>"
 }
 ```
+
+## 🌐 Endpoints da API (Backend – Django REST Framework)
+
+| Método | Endpoint | Descrição |
+|:--------|:-----------|:-----------|
+| **POST** `/api/jobs/` | Cria um novo job e envia N imagens para o S3; registra logs no DynamoDB; publica mensagens na SQS. |
+| **GET** `/api/jobs/` | Lista paginada de jobs com resumo e contagem de itens. |
+| **GET** `/api/jobs/{id}/` | Retorna os detalhes completos do job, incluindo status de cada item e texto OCR quando disponível. |
+| **PATCH** `/api/jobs/{id}/` | Atualiza o nome do job e registra a ação no DynamoDB. |
+| **DELETE** `/api/jobs/{id}/` | Remove itens do S3, registros do RDS e logs associados. |
+
+---
+
+## 📦 Estrutura de Armazenamento (S3)
+
+Os arquivos de cada job são organizados por prefixo:
+
+jobs/{job_id}/{item_id}.jpg
+
+
+---
+
+## ⚙️ Infraestrutura e Configurações
+
+- **Instâncias EC2:** `t3.micro` (educacional)  
+- **Banco de dados RDS:** `db.t3.micro`  
+- **VPC:** rede padrão (`default`)  
+- **Credenciais:** configuradas localmente em `~/.aws/credentials`  
+- **Logs:** tanto o backend quanto o worker registram todas as ações (IDs, tempos, S3 keys, mensagens da SQS, etc.)
+
+---
+
+## 🔧 Comandos Úteis (Backend Django)
+
+```bash
+python manage.py makemigrations jobs
+python manage.py migrate
+python manage.py runserver 0.0.0.0:8000
+
+ssh -i ../infra/keys/labsuser.pem ec2-user@34.201.111.201 \
+"printf '%s\n' \
+'server {' \
+'    listen 80 default_server;' \
+'    server_name _;' \
+'    location / {' \
+'        proxy_pass http://127.0.0.1:8000;' \
+'        proxy_set_header Host \$host;' \
+'        proxy_set_header X-Real-IP \$remote_addr;' \
+'    }' \
+'}' \
+| sudo tee /etc/nginx/conf.d/ocr.conf >/dev/null && \
+sudo nginx -t && sudo systemctl restart nginx"
+
+scp -i ../infra/keys/labsuser.pem ../scripts/systemd/ocr-backend.service ec2-user@34.201.111.201:/tmp/
+ssh -i ../infra/keys/labsuser.pem ec2-user@34.201.111.201 \
+"sudo mv /tmp/ocr-backend.service /etc/systemd/system/ && \
+ sudo systemctl daemon-reload && \
+ sudo systemctl enable --now ocr-backend && \
+ sudo systemctl status ocr-backend --no-pager"
+
+ssh -i ../infra/keys/labsuser.pem ec2-user@54.227.192.9 \
+"sudo mkdir -p /opt/ocr-aws/backend && sudo chown -R ec2-user:ec2-user /opt/ocr-aws"
+```
+## 🌍 Endereços de Instâncias
+
+| Componente | IP Público |
+|-------------|------------|
+| **Backend (Web)** | `34.201.111.201` |
+| **Worker** | `54.227.192.9` |
+
+---
+
+## 🧠 Observações Técnicas
+
+- OCR inicial implementado como **mock (`OK_<hash>`)** para validação do pipeline.  
+- Pode ser substituído futuramente por OCR real (ex: Tesseract ou AWS Textract).  
+- **IAM Policies** restritas por conta educacional; credenciais configuradas manualmente.  
+- **Logs detalhados** no backend e worker permitem rastrear o fluxo completo de processamento.
+
+---
+
+## 📚 Referências AWS
+
+- [AWS EC2 – Getting Started](https://aws.amazon.com/pt/ec2/getting-started/)
+- [AWS S3 – Documentação](https://aws.amazon.com/pt/s3/)
+- [AWS RDS – Guia de Uso](https://aws.amazon.com/pt/rds/getting-started/)
+- [AWS DynamoDB – Introdução](https://aws.amazon.com/pt/dynamodb/getting-started/)
+- [AWS SQS – Documentação](https://aws.amazon.com/pt/sqs/)
+- [AWS IAM – Conceitos](https://aws.amazon.com/pt/iam/)
+
+---
+
+## ✅ Requisitos Atendidos do Trabalho – Parte 01
+
+| Requisito | Implementação | Descrição |
+|------------|----------------|------------|
+| **EC2** | ✅ | Duas instâncias: backend (API Django) e worker (consumo de fila SQS). |
+| **RDS** | ✅ | Banco MySQL hospedado na AWS, armazenando jobs e itens. |
+| **S3** | ✅ | Armazenamento das imagens enviadas para OCR. |
+| **SQS** | ✅ | Fila de mensagens entre backend e worker. |
+| **DynamoDB** | ✅ | Registro de logs de processamento e operações CRUD. |
+| **IAM** | ✅ | Controle de permissões e autenticação entre serviços. |
+
+---
+
+✳️ **Observação final:**  
+A arquitetura foi projetada para demonstrar **integração prática de múltiplos serviços AWS** dentro de um fluxo real de processamento distribuído.  
+Cada componente (EC2, SQS, S3, RDS, DynamoDB) cumpre um papel definido e mostra o domínio dos conceitos de **desenvolvimento para nuvem** exigidos na disciplina.
+
+---
+
+## 👥 Equipe
+
+- João Andrade  
+- Joel Sousa  

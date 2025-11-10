@@ -1,0 +1,4 @@
+.env
+.terraform
+*pem
+user_data

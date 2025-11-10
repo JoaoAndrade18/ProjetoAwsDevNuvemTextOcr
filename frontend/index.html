@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>OCR App</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="preload" href="/styles.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="/styles.css"></noscript>
+</head>
+<body>
+<header class="top">
+  <h1>OCR Jobs</h1>
+  <button id="btnRefresh">Atualizar</button>
+</header>
+
+<section class="card">
+  <h3>Novo Job</h3>
+  <form id="formUpload">
+    <div><label>Nome: <input name="name" value="upload"></label></div>
+    <div class="mt8">
+      <input type="file" id="images" name="images" accept="image/*" multiple>
+    </div>
+    <div class="mt8">
+      <button type="submit">Enviar</button>
+    </div>
+  </form>
+  <div id="uploadMsg" class="muted"></div>
+</section>
+
+<section class="card">
+  <h3>Jobs</h3>
+  <div id="jobs"></div>
+</section>
+
+<section class="card" id="jobDetail" style="display:none">
+  <h3>Detalhes do Job <span id="jobId"></span></h3>
+  <div id="jobInfo" class="muted"></div>
+  <div id="items"></div>
+</section>
+
+<script src="/app.js"></script>
+</body>
+</html>

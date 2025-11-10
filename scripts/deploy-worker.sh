@@ -21,61 +21,17 @@ AWS_CONFIG_PATH="${6:-$HOME/.aws/config}"
 
 BASE="$(cd "$(dirname "$0")/.." && pwd)"
 
-# ==============================================================================
-# SEÇÃO MODIFICADA
-# ==============================================================================
-echo "==[0/9] Preflight remoto (pastas, pacotes, disco, swap)=="
+echo "==[0/9] Preflight remoto (pacotes, pastas)=="
+
 ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
   set -euo pipefail
-  
-  echo "--- [Preflight] 0. Pastas ---"
   sudo mkdir -p /opt/ocr-aws/worker /opt/ocr-aws/backend
   sudo chown -R ec2-user:ec2-user /opt/ocr-aws
-
-  echo "--- [Preflight] 1. Pacotes (Python, tar, libGL) ---"
-  # Adicionado: mesa-libGL (para yum/dnf) e libgl1-mesa-glx (para apt)
-  (sudo dnf -y install python3.11 python3.11-pip tar mesa-libGL || \
-   sudo yum -y install python3 python3-pip tar mesa-libGL || \
-   (sudo apt-get update -y && sudo apt-get install -y python3 python3-venv python3-pip tar libgl1-mesa-glx))
-
-  echo "--- [Preflight] 2. Expansão de Disco (Idempotente) ---"
-  # Se o volume foi aumentado na AWS, isso expande a partição e o filesystem.
-  # É seguro rodar mesmo que não haja nada a expandir.
-  sudo growpart /dev/nvme0n1 1
-  sudo xfs_growfs -d /
-  echo "Discos atuais:"
-  df -hT /
-
-  echo "--- [Preflight] 3. Criação de Swap 4GB (Idempotente) ---"
-  # Só cria o /swapfile se ele não existir
-  if [ -f /swapfile ]; then
-    echo \"/swapfile de 4GB já existe, pulando criação.\"
-  else
-    echo \"Criando /swapfile de 4GB...\"
-    sudo fallocate -l 4G /swapfile
-    sudo chmod 600 /swapfile
-    sudo mkswap /swapfile
-    echo \"/swapfile criado.\"
-  fi
-  
-  # Só ativa o swap se ele não estiver ativo
-  if swapon -s | grep -q \"/swapfile\"; then
-    echo \"Swap já está ativo.\"
-  else
-    echo \"Ativando swap...\"
-    sudo swapon /swapfile
-    echo \"Adicionando swap ao /etc/fstab para ser permanente...\"
-    echo \"/swapfile none swap sw 0 0\" | sudo tee -a /etc/fstab
-  fi
-  
-  echo \"Memória atual (com swap):\"
-  free -h
-
-  echo \"[preflight] ok\"
+  (sudo dnf -y install python3.11 python3.11-pip tar || \
+   sudo yum -y install python3 python3-pip tar || \
+   (sudo apt-get update -y && sudo apt-get install -y python3 python3-venv python3-pip tar))
+  echo [preflight] ok
 "'
-# ==============================================================================
-# FIM DA SEÇÃO MODIFICADA
-# ==============================================================================
 
 echo "==[1/9] Empacotar worker/ (sem .venv / __pycache__)=="
 TMP_TGZ="$(mktemp).tgz"
@@ -215,7 +171,7 @@ echo "==[9/9] (Opcional) Smoke-test do SQS a partir do .env do worker=="
 ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
   set -euo pipefail
   cd /opt/ocr-aws/worker
-  QURL=\$(grep -E ^SQS_QUEUE_URL= .env | cut -d=f2- || true)
+  QURL=\$(grep -E ^SQS_QUEUE_URL= .env | cut -d= -f2- || true)
   if [ -n \"\$QURL\" ]; then
     echo [sqs] testando receive_message em: \$QURL
     /opt/ocr-aws/worker/.venv/bin/python -c \"import os,boto3,json; q=os.environ.get(\"\"\"QURL\"\"\"); import sys; import os as _o; _o.environ[\"\"\"QURL\"\"\"]=q; s=boto3.client(\"\"\"sqs\"\"\"); print(json.dumps(s.receive_message(QueueUrl=q,MaxNumberOfMessages=1,WaitTimeSeconds=1,VisibilityTimeout=10), indent=2, default=str))\"

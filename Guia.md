@@ -20,6 +20,12 @@ sudo growpart /dev/nvme0n1 1
 sudo xfs_growfs -d /
 df -hT
 
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
-sudo yum install -y mesa-libGL # preciso disso no worker
+
+sudo yum install -y mesa-libGL # precisa disso no worker
 

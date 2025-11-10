@@ -1,12 +1,24 @@
+#############################################
+# 🌩️ Infraestrutura AWS - Projeto OCR
+# Arquivo principal de provisionamento Terraform
+# Responsável por criar S3, DynamoDB, SQS, RDS e EC2 (web e worker)
+#############################################
+
+# ===== Região AWS atual =====
 data "aws_region" "current" {}
 
+# ===== Variáveis locais =====
 locals {
   name = var.project
 }
 
-/* S3: bucket com nome derivado do projeto.
-   Dica: se der conflito de nome global, mude o default de var.project
-   (ex.: "ocr-aws-joao-123"). */
+#############################################
+# 🗃️ Armazenamento e Mensageria
+#############################################
+
+# S3: Bucket para armazenar imagens enviadas para OCR.
+# ⚠️ O nome do bucket é global — se der conflito, altere var.project
+# (exemplo: "ocr-aws-joao-123")
 resource "aws_s3_bucket" "images" {
   bucket        = "${local.name}-bucket"
   force_destroy = true
@@ -16,7 +28,7 @@ resource "aws_s3_bucket" "images" {
   }
 }
 
-/* DynamoDB: logs de CRUD (PK/SK) */
+# DynamoDB: Armazena logs de operações CRUD (com chave composta PK/SK)
 resource "aws_dynamodb_table" "crud_logs" {
   name         = "${local.name}-crud-logs"
   billing_mode = "PAY_PER_REQUEST"
@@ -38,7 +50,8 @@ resource "aws_dynamodb_table" "crud_logs" {
   }
 }
 
-/* SQS: fila com retenção de 2 dias */
+# SQS: Fila de mensagens para orquestrar processamento OCR entre backend e worker.
+# Retenção de mensagens configurada para 2 dias.
 resource "aws_sqs_queue" "jobs" {
   name                       = "${local.name}-queue"
   message_retention_seconds  = 172800 # 2 dias
@@ -50,11 +63,11 @@ resource "aws_sqs_queue" "jobs" {
 }
 
 
-#==============================================================================
-# 
-#==============================================================================
+#############################################
+# 🔒 Security Groups (controle de acesso)
+#############################################
 
-# ===== SGs =====
+# Web SG: permite acesso HTTP (porta 80) e SSH (22)
 resource "aws_security_group" "web_sg" {
   name        = "${var.project}-web-sg"
   description = "Allow HTTP/SSH"
@@ -103,6 +116,7 @@ resource "aws_security_group" "worker_sg" {
   tags = { Project = var.project }
 }
 
+# RDS SG: permite acesso ao banco apenas a partir das instâncias web e worker
 resource "aws_security_group" "rds_sg" {
   name        = "${var.project}-rds-sg"
   description = "Allow Postgres from web/worker"
@@ -123,7 +137,10 @@ resource "aws_security_group" "rds_sg" {
   tags = { Project = var.project }
 }
 
-# ===== Default VPC & subnet data sources =====
+#############################################
+# 🌐 Rede e Subnets (default)
+#############################################
+
 data "aws_vpc" "default" { default = true }
 data "aws_subnets" "default" { 
   filter { 
@@ -132,7 +149,10 @@ data "aws_subnets" "default" {
     } 
   }
 
-# ===== RDS Postgres =====
+#############################################
+# 🛢️ Banco de Dados RDS (PostgreSQL)
+#############################################
+
 resource "aws_db_subnet_group" "rds_subnets" {
   name       = "${var.project}-rds-subnets"
   subnet_ids = data.aws_subnets.default.ids
@@ -157,7 +177,11 @@ resource "aws_db_instance" "rds" {
   tags = { Project = var.project }
 }
 
-# ===== AMI Amazon Linux 2023 =====
+#############################################
+# 💻 Instâncias EC2 (Web e Worker)
+#############################################
+
+# AMI base: Amazon Linux 2023 (mais recente)
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["137112412989"] # Amazon
@@ -167,7 +191,7 @@ data "aws_ami" "al2023" {
     }
 }
 
-# ===== EC2 Web =====
+# EC2 Web (Backend Django + API)
 resource "aws_instance" "web" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.web_instance_type
@@ -177,7 +201,7 @@ resource "aws_instance" "web" {
   tags = { Name = "${var.project}-web", Project = var.project }
 }
 
-# ===== EC2 Worker =====
+# EC2 Worker (consome fila SQS e processa OCR)
 resource "aws_instance" "worker" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.worker_instance_type

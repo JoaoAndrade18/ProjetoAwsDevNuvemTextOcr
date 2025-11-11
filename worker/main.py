@@ -19,118 +19,85 @@ Executado continuamente em instância EC2 (t3.micro educacional), gerenciado via
 import io
 import os, sys, json, time, traceback
 from dotenv import load_dotenv
-from PIL import Image
-import numpy as np
 
-# -------------------------------------------------------------------------
-# 🔧 Carregamento inicial de ambiente e configuração do Django
-# -------------------------------------------------------------------------
+# ================================================================
+# Configuração inicial do ambiente e carregamento do Django
+# ================================================================
 
-# Carrega o arquivo .env local do worker (contém variáveis sensíveis)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Carrega as variáveis de ambiente do arquivo .env localizado no diretório do worker
+BASE_DIR = os.path.dirname(os.path.abspath(_file_))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-# Permite importar o backend Django (para acessar modelos e ORM)
+# Adiciona o diretório do backend ao path, permitindo importar os modelos Django
 BACKEND_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "backend"))
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
-# Define o módulo de configuração padrão do Django
+# Configura o Django para usar as definições do projeto
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "app.settings")
 import django
 django.setup()
 
-# -------------------------------------------------------------------------
-# ⚙️ Configuração do PaddleOCR
-# -------------------------------------------------------------------------
-print("[WORKER] Configurando ENVs do Paddle...")
+# ================================================================
+# Inicialização do OCR (substituímos PaddleOCR por EasyOCR)
+# ================================================================
 
-# Define variáveis de ambiente exigidas pelo PaddleOCR
-# Essas variáveis evitam erros de inicialização em ambiente EC2 minimalista
-os.environ.setdefault("FLAGS_use_mkldnn", "0")
-os.environ.setdefault("PDX_HOME", "/home/ec2-user/.pdx")
-os.environ.setdefault("PADDLEOCR_HOME", "/home/ec2-user/.paddleocr")
+import easyocr
 
-# Import do PaddleOCR deve ocorrer após configuração das ENVs
-from paddleocr import PaddleOCR
+# ================================================================
+# Integração com AWS (S3 e SQS) e modelos do Django
+# ================================================================
 
-# -------------------------------------------------------------------------
-# ☁️ Integração com AWS e ORM
-# -------------------------------------------------------------------------
 import boto3
 from django.conf import settings
 from django.db import transaction
 from app.jobs.models import Job, JobItem
 
-# Cria sessão AWS para S3 e SQS, usando região do arquivo de configuração Django
+# Cria a sessão AWS com base na região definida nas configurações do Django
 session = boto3.session.Session(region_name=settings.AWS_REGION)
 s3 = session.client("s3")
 sqs = session.client("sqs")
 
-# -------------------------------------------------------------------------
-# 🧠 Inicialização global do OCR (feito uma única vez)
-# -------------------------------------------------------------------------
-print("[WORKER] Inicializando PaddleOCR (isso pode levar um tempo)...")
-_OCR = PaddleOCR(
-    use_doc_orientation_classify=False,
-    use_doc_unwarping=False,
-    use_textline_orientation=False
-)
-print("[WORKER] PaddleOCR pronto.")
+# Inicializa o modelo EasyOCR apenas uma vez (para evitar recarregar a cada mensagem)
+print("[WORKER] Inicializando EasyOCR (isso pode levar um tempo)...")
+_EASYOCR_MODEL = easyocr.Reader(['en'], gpu=False)
+print("[WORKER] EasyOCR pronto.")
 
-def get_ocr():
-    """Retorna a instância global e pré-inicializada do PaddleOCR."""
-    global _OCR
-    return _OCR
 
-# -------------------------------------------------------------------------
-# 🔍 Função principal de OCR (mock realista usando PaddleOCR)
-# -------------------------------------------------------------------------
+def get_easyocr_model():
+    """Retorna a instância global do modelo EasyOCR já carregado."""
+    global _EASYOCR_MODEL
+    return _EASYOCR_MODEL
+
+# ================================================================
+# Função de OCR usando EasyOCR
+# ================================================================
+
 def mock_ocr(bytes_data: bytes) -> str:
     """
-    Executa OCR sobre bytes de imagem e retorna o texto extraído.
+    Executa o OCR diretamente nos bytes da imagem usando EasyOCR.
 
-    - Redimensiona a imagem caso exceda 640px de largura (para performance).
-    - Usa o PaddleOCR já inicializado.
-    - Retorna o texto detectado, concatenado por quebras de linha.
-
-    Parâmetros:
-        bytes_data: Conteúdo binário da imagem (obtido via S3.get_object).
-
-    Retorna:
-        String com o texto reconhecido (ou string vazia se não houver texto).
+    - Não utiliza PIL nem Numpy, o que reduz dependências.
+    - O processamento é feito em CPU (gpu=False).
+    - O retorno é o texto reconhecido, unido em um único parágrafo.
     """
-    ocr = get_ocr() # Agora apenas retorna a instância pronta
-    img = Image.open(io.BytesIO(bytes_data)).convert("RGB")
-
-    MAX_WIDTH = 640
-    width, height = img.size
-
-    if width > MAX_WIDTH:
-        try:
-            # Calcula a nova altura mantendo a proporção
-            new_height = int(MAX_WIDTH * (height / width))
-            print(f"[RESIZE] Redimensionando de {width}x{height} para {MAX_WIDTH}x{new_height}")
-            # Usa ANTIALIAS para qualidade
-            img = img.resize((MAX_WIDTH, new_height), Image.Resampling.LANCZOS) 
-        except Exception as e:
-            print(f"[RESIZE_WARN] Falha ao redimensionar imagem: {e}")
-            # Continua com a imagem original se falhar
-
-    result = ocr.predict(np.array(img)) 
+    ocr = get_easyocr_model() 
     
-    texts = []
-    if result and result[0]:
-        for line in result[0]:
-            if line and len(line) >= 2 and line[1]:
-                texts.append(line[1][0])
-    return "\n".join(texts).strip()
+    print(f"[INFO] Processando imagem com EasyOCR...")
 
-# -------------------------------------------------------------------------
-# 🧩 Utilitário: marca job como concluído se todos os itens estiverem DONE
-# -------------------------------------------------------------------------
+    result = ocr.readtext(bytes_data, detail=0, paragraph=True)
+    
+    return " ".join(result).strip()
+
+# ================================================================
+# Controle de status de jobs
+# ================================================================
+
 def set_job_status_if_complete(job: Job):
-    """Verifica se todos os itens do job foram processados com sucesso."""
+    """
+    Verifica se todos os itens de um job foram processados.
+    Caso positivo, marca o job como concluído (status DONE).
+    """
     total = job.items.count()
     done = job.items.filter(status="DONE").count()
     if total > 0 and done == total and job.status != "DONE":
@@ -138,23 +105,21 @@ def set_job_status_if_complete(job: Job):
         job.save(update_fields=["status"])
         print(f"[JOB_DONE] job={job.id} total={total}")
 
-# -------------------------------------------------------------------------
-# 📦 Processamento individual de mensagens da fila SQS
-# -------------------------------------------------------------------------
+# ================================================================
+# Processamento de mensagens da fila SQS
+# ================================================================
+
 def process_message(msg):
     """
-    Processa uma mensagem da fila SQS (um item de OCR).
+    Processa uma mensagem da fila SQS, que representa um item de OCR.
 
-    Fluxo:
-        1. Extrai job_id, item_id e caminho do S3.
-        2. Baixa os bytes da imagem do S3.
-        3. Atualiza o status do item para PROCESSING.
-        4. Executa OCR e grava resultado no banco.
-        5. Marca job como DONE se todos os itens forem concluídos.
-
-    Em caso de falha:
-        - Atualiza status para ERROR.
-        - Registra mensagem de erro em `error_msg`.
+    Etapas:
+    1. Lê a mensagem e extrai job_id, item_id e informações do S3.
+    2. Faz o download da imagem no S3.
+    3. Atualiza o item como PROCESSING no banco.
+    4. Executa o OCR com EasyOCR.
+    5. Atualiza o texto reconhecido e marca o item como DONE.
+    6. Se todos os itens do job estiverem concluídos, marca o job como DONE.
     """
     body = json.loads(msg["Body"])
     job_id = body["job_id"]
@@ -164,11 +129,11 @@ def process_message(msg):
 
     print(f"[RECV] job={job_id} item={item_id} key={key}")
 
-    # Baixa o arquivo da imagem do S3
+    # Faz o download do arquivo no S3
     obj = s3.get_object(Bucket=bucket, Key=key)
     raw = obj["Body"].read()
 
-    # Marca item como PROCESSING
+    # Marca o item como "PROCESSING"
     try:
         with transaction.atomic():
             it = JobItem.objects.select_for_update().get(id=item_id)
@@ -178,7 +143,7 @@ def process_message(msg):
         print(f"[WARN] item não encontrado no DB: {item_id}")
         return
 
-    # Executa OCR e grava resultado
+    # Executa o OCR e atualiza o banco
     try:
         text = mock_ocr(raw)
         with transaction.atomic():
@@ -190,7 +155,7 @@ def process_message(msg):
             set_job_status_if_complete(it.job)
         print(f"[DONE] job={job_id} item={item_id} text='{text[:60]}'")
     except Exception as e:
-        err = f"{type(e).__name__}: {e}"
+        err = f"{type(e)._name_}: {e}"
         with transaction.atomic():
             it = JobItem.objects.select_for_update().get(id=item_id)
             it.error_msg = err
@@ -199,17 +164,18 @@ def process_message(msg):
         print(f"[ERROR] job={job_id} item={item_id} {err}")
         traceback.print_exc()
 
-# -------------------------------------------------------------------------
-# 🚀 Loop principal do worker
-# -------------------------------------------------------------------------
+# ================================================================
+# Loop principal do worker
+# ================================================================
+
 def main():
     """
-    Loop principal responsável por consumir continuamente a fila SQS.
+    Loop principal que mantém o worker escutando a fila SQS.
 
     - Faz long polling (20s) para reduzir custo e requisições ociosas.
-    - Processa até 5 mensagens por ciclo.
-    - Em caso de sucesso, remove a mensagem da fila.
-    - Em falhas, mantém a mensagem para reprocessamento automático (retry da SQS).
+    - Processa até 5 mensagens por vez.
+    - Remove da fila as mensagens processadas com sucesso.
+    - Mantém mensagens com erro para reprocessamento automático.
     """
     queue_url = settings.SQS_QUEUE_URL
     assert queue_url, "SQS_QUEUE_URL vazio no .env"
@@ -219,12 +185,12 @@ def main():
         resp = sqs.receive_message(
             QueueUrl=queue_url,
             MaxNumberOfMessages=5,
-            WaitTimeSeconds=20,  # long polling
+            WaitTimeSeconds=20, 
             VisibilityTimeout=60
         )
         msgs = resp.get("Messages", [])
         if not msgs:
-            # pouca movimentação: dorme um tico
+            # Nenhuma nova mensagem — aguarda um pouco
             time.sleep(2)
             continue
 
@@ -238,14 +204,15 @@ def main():
                 print(f"[FAIL] mantendo na fila: {e}")
                 traceback.print_exc()
 
-# -------------------------------------------------------------------------
-# ▶️ Ponto de entrada do worker
-# -------------------------------------------------------------------------
-if __name__ == "__main__":
-    """
-    Inicializa o serviço worker.
+# ================================================================
+# Ponto de entrada do script
+# ================================================================
 
-    Este script deve ser executado como processo persistente em EC2,
-    tipicamente gerenciado via systemd (ocr-worker.service).
+if _name_ == "_main_":
+    """
+    Inicia o serviço worker.
+
+    Este script deve ser executado continuamente em uma instância EC2.
+    Normalmente, ele é iniciado e mantido em execução via systemd (ocr-worker.service).
     """
     main()

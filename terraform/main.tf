@@ -1,5 +1,5 @@
 #############################################
-# 🌩️ Infraestrutura AWS - Projeto OCR
+# Infraestrutura AWS - Projeto OCR
 # Arquivo principal de provisionamento Terraform
 # Responsável por criar S3, DynamoDB, SQS, RDS e EC2 (web e worker)
 #############################################
@@ -13,11 +13,11 @@ locals {
 }
 
 #############################################
-# 🗃️ Armazenamento e Mensageria
+# Armazenamento e Mensageria
 #############################################
 
 # S3: Bucket para armazenar imagens enviadas para OCR.
-# ⚠️ O nome do bucket é global — se der conflito, altere var.project
+# O nome do bucket é global — se der conflito, altere var.project
 # (exemplo: "ocr-aws-joao-123")
 resource "aws_s3_bucket" "images" {
   bucket        = "${local.name}-bucket"
@@ -64,7 +64,7 @@ resource "aws_sqs_queue" "jobs" {
 
 
 #############################################
-# 🔒 Security Groups (controle de acesso)
+# Security Groups (controle de acesso)
 #############################################
 
 # Web SG: permite acesso HTTP (porta 80) e SSH (22)
@@ -138,7 +138,7 @@ resource "aws_security_group" "rds_sg" {
 }
 
 #############################################
-# 🌐 Rede e Subnets (default)
+# Rede e Subnets (default)
 #############################################
 
 data "aws_vpc" "default" { default = true }
@@ -150,7 +150,7 @@ data "aws_subnets" "default" {
   }
 
 #############################################
-# 🛢️ Banco de Dados RDS (PostgreSQL)
+# Banco de Dados RDS (PostgreSQL)
 #############################################
 
 resource "aws_db_subnet_group" "rds_subnets" {
@@ -178,7 +178,7 @@ resource "aws_db_instance" "rds" {
 }
 
 #############################################
-# 💻 Instâncias EC2 (Web e Worker)
+# Instâncias EC2 (Web e Worker)
 #############################################
 
 # AMI base: Amazon Linux 2023 (mais recente)

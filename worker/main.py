@@ -9,7 +9,7 @@ de dados RDS via ORM do Django.
 Fluxo geral:
 1. Recebe mensagens da SQS com job_id, item_id e caminho S3.
 2. Faz download da imagem.
-3. Executa OCR (mock ou real via PaddleOCR).
+3. Executa OCR.
 4. Atualiza status e texto reconhecido no RDS.
 5. Marca o job como concluído se todos os itens forem processados.
 

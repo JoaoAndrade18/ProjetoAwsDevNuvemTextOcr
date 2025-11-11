@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Deploy completo do WEB (Nginx + Backend + opcional Frontend) em Amazon Linux 2023
-# - Sobe/atualiza Nginx com /api e /health proxied para Gunicorn (127.0.0.1:8000)
-# - Publica o backend (venv, requirements, migrate) e o service systemd com ambiente AWS
-# - Publica o frontend (se houver build local); caso contrário, cria um placeholder
-# Uso: ./deploy-web.sh <WEB_IP> <path_pem>
+
+# Deploy do servidor WEB (Nginx + Backend e opcionalmente Frontend) em Amazon Linux 2023.
+#
+# O que este script faz:
+# - Configura Nginx para servir o frontend e fazer proxy da API /health e /api para o backend (Gunicorn em 127.0.0.1:8000)
+# - Envia o código do backend, cria virtualenv, instala dependências, roda migrações
+# - Configura um serviço systemd para manter o backend rodando
+# - Publica o frontend (caso exista build) ou um HTML simples como placeholder
+#
+# Uso:
+#   ./deploy-web.sh <WEB_IP> <path_pem>
+
 set -euo pipefail
 
 if [ $# -lt 2 ]; then
@@ -14,26 +21,26 @@ fi
 WEB_IP="$1"
 PEM="$2"
 
-# Raiz do projeto local (contendo backend/ e opcionalmente frontend/)
+# Diretório raiz do projeto (onde estão o backend e, se existir, frontend)
 BASE="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Verificações mínimas
+# Valida presença mínima do backend antes de continuar
 [ -f "$BASE/backend/manage.py" ] || { echo "backend/manage.py não encontrado"; exit 1; }
 [ -f "$BASE/backend/requirements.txt" ] || { echo "backend/requirements.txt não encontrado"; exit 1; }
 [ -f "$BASE/backend/.env" ] || { echo "backend/.env não encontrado"; exit 1; }
 
-# (Opcional) diretório de build do frontend
+# Detecta build do frontend, se existir
 FRONT_SRC=""
 if [ -d "$BASE/frontend/dist" ]; then
   FRONT_SRC="$BASE/frontend/dist"
 elif [ -d "$BASE/frontend/build" ]; then
   FRONT_SRC="$BASE/frontend/build"
 elif [ -d "$BASE/frontend" ]; then
-  # se não houver processo de build, tentaremos publicar o próprio /frontend
+  # fallback: publica o conteúdo direto de /frontend
   FRONT_SRC="$BASE/frontend"
 fi
 
-# Garantir permissões da chave no Git Bash
+# Garante permissão correta na chave SSH
 chmod 600 "$PEM" || true
 
 echo "==[0/9] Preflight remoto (pacotes, pastas, nginx)=="
@@ -202,7 +209,7 @@ User=ec2-user
 WorkingDirectory=/opt/ocr-aws/backend
 EnvironmentFile=/opt/ocr-aws/backend/.env
 
-# Ambiente/credenciais AWS
+# Configuração de ambiente/AWS para o backend
 Environment=HOME=/home/ec2-user
 Environment=AWS_REGION=us-east-1
 Environment=AWS_DEFAULT_REGION=us-east-1
@@ -210,7 +217,7 @@ Environment=AWS_SHARED_CREDENTIALS_FILE=/home/ec2-user/.aws/credentials
 Environment=AWS_CONFIG_FILE=/home/ec2-user/.aws/config
 Environment=AWS_PROFILE=default
 
-# Gunicorn no loopback (Nginx faz proxy)
+# Gunicorn ouvindo apenas no loopback (127.0.0.1), acessível apenas pelo Nginx via proxy reverso.
 ExecStart=/opt/ocr-aws/backend/.venv/bin/gunicorn app.wsgi:application \
   --bind 127.0.0.1:8000 --workers 2 --access-logfile - --error-logfile -
 

@@ -1,13 +1,17 @@
-const API = location.origin; // mesmo host via Nginx
+// Usa o mesmo host da página (Nginx faz o proxy para o backend em /api)
+const API = location.origin;
 
+// Busca a lista de jobs na API e envia para renderização
 async function listJobs(){
   const r = await fetch(`${API}/api/jobs/`, {headers:{Accept:'application/json'}});
   const data = await r.json();
   renderJobs(data.results || []);
 }
 
+// Garante que textos com <, > ou & apareçam corretamente sem quebrar o HTML
 function esc(s){ return (s||'').replace(/[<>&]/g, m => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[m])); }
 
+// Renderiza a listagem de jobs no elemento #jobs
 function renderJobs(jobs){
   const el = document.getElementById('jobs');
   if(!jobs.length){ el.innerHTML = '<div class="muted">Nenhum job.</div>'; return; }
@@ -27,14 +31,19 @@ function renderJobs(jobs){
   `).join('<hr>');
 }
 
+// Abre o painel de detalhes de um job e inicia o refresh automático
 async function openJob(id){
   document.getElementById('jobDetail').style.display='block';
   document.getElementById('jobId').textContent=id;
+  
   await refreshJob(id);
+  
+  // Atualiza o job a cada 4 segundos enquanto estiver aberto
   if(window._jobTimer) clearInterval(window._jobTimer);
   window._jobTimer = setInterval(()=>refreshJob(id), 4000);
 }
 
+// Busca os detalhes do job + itens e atualiza o painel de detalhes
 async function refreshJob(id){
   const r = await fetch(`${API}/api/jobs/${id}/`, {headers:{Accept:'application/json'}});
   const j = await r.json();
@@ -52,14 +61,17 @@ async function refreshJob(id){
   document.getElementById('items').innerHTML = items || '<div class="muted">Sem itens.</div>';
 }
 
+// Envia DELETE para remover o job e recarrega a listagem
 async function delJob(id){
   if(!confirm('Excluir este job?')) return;
   const r = await fetch(`${API}/api/jobs/${id}/`, {method:'DELETE'});
   if(r.ok){ listJobs(); document.getElementById('jobDetail').style.display='none'; }
 }
 
+// Botão de "Atualizar" da lista
 document.getElementById('btnRefresh').onclick = listJobs;
 
+// Form de upload: cria um novo job com N imagens e abre os detalhes
 document.getElementById('formUpload').addEventListener('submit', async (ev)=>{
   ev.preventDefault();
   const fd = new FormData(ev.target);
@@ -76,4 +88,5 @@ document.getElementById('formUpload').addEventListener('submit', async (ev)=>{
   }
 });
 
+// Carrega a lista ao abrir a página
 listJobs();

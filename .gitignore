@@ -2,3 +2,5 @@
 .terraform
 *pem
 user_data
+terraform.tfstate
+terraform.tfstate.backup

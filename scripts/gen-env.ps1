@@ -1,4 +1,3 @@
-# scripts/gen-env.ps1
 param(
   [string]$BackendEnvPath = "..\backend\.env",
   [string]$WorkerEnvPath  = "..\worker\.env"
@@ -8,7 +7,7 @@ $ErrorActionPreference = "Stop"
 # Descobre a pasta do terraform relativa a este script (funciona de qualquer cwd)
 $TfDir = Join-Path $PSScriptRoot "..\terraform"
 
-# 1) pegar outputs do terraform (em JSON)
+# pegar outputs do terraform (em JSON)
 Push-Location $TfDir
 try {
   $o = terraform output -json | ConvertFrom-Json
@@ -49,14 +48,14 @@ function Get-Out($obj, $name) {
   return ""
 }
 
-# 2) valores do Terraform
+# valores do Terraform
 $AWS_REGION = Get-Out $o "aws_region"
 $S3_BUCKET  = Get-Out $o "s3_bucket"
 $SQS_URL    = Get-Out $o "sqs_queue_url"
 $DDB_TABLE  = Get-Out $o "dynamo_table"
 $RDS_HOST   = Get-Out $o "rds_endpoint"
 $RDS_DB     = Get-Out $o "rds_db_name"
-$RDS_USER_OUT = Get-Out $o "rds_user"   # adicione output "rds_user" = var.db_user no outputs.tf
+$RDS_USER_OUT = Get-Out $o "rds_user"   
 
 # Fallbacks
 if (-not $AWS_REGION -and $env:AWS_REGION) { $AWS_REGION = $env:AWS_REGION }
@@ -73,7 +72,7 @@ if ($RDS_USER_OUT) {
   if ($oldWorker["RDS_USER"])  { $RDS_USER_WORKER  = $oldWorker["RDS_USER"]  } else { $RDS_USER_WORKER  = "ocruser" }
 }
 
-# 3) backend/.env
+# backend/.env
 $backendEnv = @"
 # === generated from terraform outputs ===
 AWS_REGION=$AWS_REGION
@@ -95,13 +94,13 @@ RDS_HOST=$RDS_HOST
 RDS_PORT=5432
 RDS_DB=$RDS_DB
 RDS_USER=$RDS_USER_BACKEND
-RDS_PASSWORD=$RDS_PASSWORD
+RDS_PASSWORD=$RDS_PASSWORD  # A senha pode ser setada aqui. ex: 1234_@#$
 RDS_SSLMODE=require
 # regras
 SQS_RETENTION_SECONDS=172800
 "@
 
-# 4) worker/.env
+# worker/.env
 $workerRdsPass = $oldWorker["RDS_PASSWORD"]
 if (-not $workerRdsPass) { $workerRdsPass = $RDS_PASSWORD }
 
@@ -126,10 +125,10 @@ RDS_PASSWORD=$workerRdsPass
 SQS_RETENTION_SECONDS=172800
 "@
 
-# 5) escrever
+# escrever
 $backendEnv | Out-File -FilePath $BackendEnvPath -Encoding ascii -Force
 $workerEnv  | Out-File -FilePath $WorkerEnvPath  -Encoding ascii -Force
 
-Write-Host "✅ .env gerados:"
+Write-Host "   .env gerados:"
 Write-Host "   $BackendEnvPath"
 Write-Host "   $WorkerEnvPath"

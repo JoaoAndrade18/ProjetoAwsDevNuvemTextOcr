@@ -4,9 +4,6 @@ locals {
   name = var.project
 }
 
-/* S3: bucket com nome derivado do projeto.
-   Dica: se der conflito de nome global, mude o default de var.project
-   (ex.: "ocr-aws-joao-123"). */
 resource "aws_s3_bucket" "images" {
   bucket        = "${local.name}-bucket"
   force_destroy = true
@@ -16,7 +13,6 @@ resource "aws_s3_bucket" "images" {
   }
 }
 
-/* DynamoDB: logs de CRUD (PK/SK) */
 resource "aws_dynamodb_table" "crud_logs" {
   name         = "${local.name}-crud-logs"
   billing_mode = "PAY_PER_REQUEST"
@@ -38,7 +34,6 @@ resource "aws_dynamodb_table" "crud_logs" {
   }
 }
 
-/* SQS: fila com retenção de 2 dias */
 resource "aws_sqs_queue" "jobs" {
   name                       = "${local.name}-queue"
   message_retention_seconds  = 172800 # 2 dias
@@ -49,12 +44,6 @@ resource "aws_sqs_queue" "jobs" {
   }
 }
 
-
-#==============================================================================
-# 
-#==============================================================================
-
-# ===== SGs =====
 resource "aws_security_group" "web_sg" {
   name        = "${var.project}-web-sg"
   description = "Allow HTTP/SSH"
@@ -72,8 +61,7 @@ resource "aws_security_group" "web_sg" {
     protocol = "tcp" 
     cidr_blocks = ["0.0.0.0/0"] 
     }
-  # opcional: expor 8000 se quiser dev
-  # ingress { from_port = 8000 to_port = 8000 protocol = "tcp" cidr_blocks = ["0.0.0.0/0"] }
+
   egress  { 
     from_port = 0   
     to_port = 0   
@@ -123,7 +111,7 @@ resource "aws_security_group" "rds_sg" {
   tags = { Project = var.project }
 }
 
-# ===== Default VPC & subnet data sources =====
+# -- VPC & subnet data sources
 data "aws_vpc" "default" { default = true }
 data "aws_subnets" "default" { 
   filter { 
@@ -132,7 +120,7 @@ data "aws_subnets" "default" {
     } 
   }
 
-# ===== RDS Postgres =====
+# -- RDS Postgres
 resource "aws_db_subnet_group" "rds_subnets" {
   name       = "${var.project}-rds-subnets"
   subnet_ids = data.aws_subnets.default.ids
@@ -142,7 +130,6 @@ resource "aws_db_subnet_group" "rds_subnets" {
 resource "aws_db_instance" "rds" {
   identifier              = "${var.project}-rds"
   engine                  = "postgres"
-  # engine_version          = "16.4"
   instance_class          = "db.t3.micro"
   allocated_storage       = 20
   username                = var.db_user

@@ -12,7 +12,7 @@ bash scripts/deploy-web.sh "$WEB_IP" "$PEM"
 # subir o worker
 WORKER_IP=3.83.237.26
 
--- Editar o volume da EC2 worker e colocar 20 GB.
+-- Editar o volume da EC2 worker e colocar 30 GB.
 
 bash scripts/deploy-worker.sh "$WORKER_IP" "$PEM"
 

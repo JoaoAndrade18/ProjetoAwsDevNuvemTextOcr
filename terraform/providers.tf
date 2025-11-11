@@ -9,11 +9,4 @@ terraform {
   }
 }
 
-/* Se sua região já está no ~/.aws/config (profile default), isto basta: */
 provider "aws" {}
-
-/* ALTERNATIVA: se quiser travar a região por variável:
-provider "aws" {
-  region = var.aws_region
-}
-*/

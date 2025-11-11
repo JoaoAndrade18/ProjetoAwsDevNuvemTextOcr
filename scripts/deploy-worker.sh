@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
-# Deploy do worker (SQS Consumer) - Git Bash / Linux
+
+# Deploy do worker (SQS Consumer)
+#
+# Responsabilidade:
+# - Preparar a EC2 do worker (pacotes, pastas, swap, disco).
+# - Enviar código do worker e backend mínimo necessário.
+# - Configurar ambiente Python/venv.
+# - Copiar credenciais AWS.
+# - Criar e iniciar o serviço systemd do worker.
+#
 # Uso:
 #   bash scripts/deploy-worker.sh <WORKER_IP> <path_pem> [AWS_PROFILE_NAME] [AWS_REGION] [AWS_CREDENTIALS_PATH] [AWS_CONFIG_PATH]
+#
 # Exemplo:
 #   bash scripts/deploy-worker.sh 3.93.48.170 ./infra/keys/labsuser.pem default us-east-1 "$HOME/.aws/credentials" "$HOME/.aws/config"
 
@@ -22,8 +32,13 @@ AWS_CONFIG_PATH="${6:-$HOME/.aws/config}"
 BASE="$(cd "$(dirname "$0")/.." && pwd)"
 
 # ==============================================================================
-# SEÇÃO MODIFICADA
+# [0/9] Preparação: pastas, pacotes, disco e swap
+# - Garante estrutura em /opt/ocr-aws
+# - Instala Python, pip, tar e libs gráficas necessárias para OCR
+# - Expande disco (se já tiver sido aumentado no console AWS)
+# - Cria/ativa swap de 4GB se ainda não existir
 # ==============================================================================
+
 echo "==[0/9] Preflight remoto (pastas, pacotes, disco, swap)=="
 ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
   set -euo pipefail
@@ -74,7 +89,7 @@ ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
   echo \"[preflight] ok\"
 "'
 # ==============================================================================
-# FIM DA SEÇÃO MODIFICADA
+# [1/9] Empacota diretório worker/ (sem venv, cache, git)
 # ==============================================================================
 
 echo "==[1/9] Empacotar worker/ (sem .venv / __pycache__)=="
@@ -85,6 +100,10 @@ tar -C "$BASE" -czf "$TMP_TGZ" \
   --exclude="worker/.git" \
   worker
 
+# ==============================================================================
+# [2/9] Envia e extrai o código do worker na EC2
+# ==============================================================================
+
 echo "==[2/9] Enviar e extrair worker/=="
 scp -o StrictHostKeyChecking=no -i "$PEM" "$TMP_TGZ" "ec2-user@${WORKER_IP}:/tmp/worker.tgz"
 rm -f "$TMP_TGZ"
@@ -94,8 +113,17 @@ ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
   tar -xzf /tmp/worker.tgz -C /opt/ocr-aws && rm -f /tmp/worker.tgz
 "'
 
+# ==============================================================================
+# [3/9] Copia o .env exato do worker
+# ==============================================================================
+
 echo "==[3/9] Enviar .env do worker=="
 scp -o StrictHostKeyChecking=no -i "$PEM" "$BASE/worker/.env" "ec2-user@${WORKER_IP}:/opt/ocr-aws/worker/.env"
+
+# ==============================================================================
+# [4/9] Garante código mínimo do backend disponível para o worker
+# - Necessário para importar settings e modelos Django
+# ==============================================================================
 
 echo "==[4/9] Garantir código Django disponível (app/ + manage.py + requirements.txt)=="
 TMP_TGZ2="$(mktemp).tgz"
@@ -108,6 +136,10 @@ ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
   tar -xzf /tmp/backend_bits.tgz -C /opt/ocr-aws/backend && rm -f /tmp/backend_bits.tgz
   ls -la /opt/ocr-aws/backend ; ls -la /opt/ocr-aws/backend/app || true
 "'
+
+# ==============================================================================
+# [5/9] Cria venv do worker e instala dependências
+# ==============================================================================
 
 echo "==[5/9] Venv + dependências do worker=="
 ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
@@ -123,6 +155,10 @@ ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
   pip install psycopg2-binary==2.9.9
   echo [venv] ok
 "'
+
+# ==============================================================================
+# [6/9] Copia credenciais AWS locais para a EC2 (modo arquivo, sem IAM)
+# ==============================================================================
 
 echo "==[6/9] Publicar credenciais AWS do desktop para a EC2=="
 ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
@@ -145,6 +181,10 @@ ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
   chmod 600 /home/ec2-user/.aws/config 2>/dev/null || true
   echo [aws dir]; ls -la /home/ec2-user/.aws
 "'
+
+# ==============================================================================
+# [7/9] Cria service systemd do worker e sobe o serviço
+# ==============================================================================
 
 echo "==[7/9] Publicar systemd unit (com HOME e variáveis AWS) e iniciar=="
 UNIT_FILE="$(mktemp)"
@@ -200,6 +240,9 @@ echo "--- journal (últimas 80) ---"
 /usr/bin/journalctl -u ocr-worker -n 80 --no-pager || true
 REMOTE
 
+# ==============================================================================
+# [8/9] Teste rápido: minha identificação na AWS (STS) com o mesmo ambiente do serviço
+# ==============================================================================
 
 echo "==[8/9] Verificação STS no mesmo ambiente do serviço=="
 ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'sudo bash -lc "
@@ -210,6 +253,10 @@ ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'sudo bash -lc
   export AWS_EC2_METADATA_DISABLED=true
   /opt/ocr-aws/worker/.venv/bin/python -c \"import boto3, json;print(json.dumps(boto3.client(\"\"\"sts\"\"\").get_caller_identity(), indent=2))\"
 "'
+
+# ==============================================================================
+# [9/9] Teste opcional da SQS com base no .env do worker
+# ==============================================================================
 
 echo "==[9/9] (Opcional) Smoke-test do SQS a partir do .env do worker=="
 ssh -o StrictHostKeyChecking=no -i "$PEM" "ec2-user@${WORKER_IP}" 'bash -lc "
